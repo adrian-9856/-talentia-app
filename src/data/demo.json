@@ -1,0 +1,31 @@
+{
+  "organization": {"id": "org-demo", "name": "Entidad demostrativa", "active": true},
+  "programs": [
+    {"id": "prog-tec", "name": "Formación técnica", "type": "tecnica", "active": true},
+    {"id": "prog-emp", "name": "Preparación para el empleo", "type": "empleabilidad", "active": true},
+    {"id": "prog-dig", "name": "Habilidades digitales", "type": "curso", "active": true}
+  ],
+  "participants": [
+    {"id":"p001","demo_name":"Ana Ejemplo","email":"ana@example.com","municipality":"Guatemala","program_id":"prog-tec","status":"graduada","training_type":"tecnica","profile_complete":true,"diagnosis_complete":true,"route_defined":true,"cv_ready":true,"followup_pending":false},
+    {"id":"p002","demo_name":"Beatriz Prueba","email":"beatriz@example.com","municipality":"Mixco","program_id":"prog-tec","status":"graduada","training_type":"tecnica","profile_complete":true,"diagnosis_complete":true,"route_defined":true,"cv_ready":true,"followup_pending":true},
+    {"id":"p003","demo_name":"Carla Muestra","email":"carla@example.com","municipality":"Villa Nueva","program_id":"prog-dig","status":"graduada","training_type":"curso","profile_complete":true,"diagnosis_complete":true,"route_defined":true,"cv_ready":true,"followup_pending":false},
+    {"id":"p004","demo_name":"Daniela Demo","email":"daniela@example.com","municipality":"Guatemala","program_id":"prog-emp","status":"cv_listo","training_type":"otra","profile_complete":true,"diagnosis_complete":true,"route_defined":true,"cv_ready":true,"followup_pending":false},
+    {"id":"p005","demo_name":"Elena Ensayo","email":"elena@example.com","municipality":"Mixco","program_id":"prog-tec","status":"cv_listo","training_type":"tecnica","profile_complete":true,"diagnosis_complete":true,"route_defined":true,"cv_ready":true,"followup_pending":false},
+    {"id":"p006","demo_name":"Fabiola Caso","email":"fabiola@example.com","municipality":"Guatemala","program_id":"prog-emp","status":"ruta_definida","training_type":"otra","profile_complete":true,"diagnosis_complete":true,"route_defined":true,"cv_ready":false,"followup_pending":true},
+    {"id":"p007","demo_name":"Gabriela Simulación","email":"gabriela@example.com","municipality":"Villa Nueva","program_id":"prog-dig","status":"ruta_definida","training_type":"curso","profile_complete":true,"diagnosis_complete":true,"route_defined":true,"cv_ready":false,"followup_pending":false},
+    {"id":"p008","demo_name":"Helena Modelo","email":"helena@example.com","municipality":"Mixco","program_id":"prog-emp","status":"perfil_en_proceso","training_type":"otra","profile_complete":false,"diagnosis_complete":false,"route_defined":false,"cv_ready":false,"followup_pending":false},
+    {"id":"p009","demo_name":"Irene Ficticia","email":"irene@example.com","municipality":"Guatemala","program_id":"prog-tec","status":"perfil_en_proceso","training_type":"tecnica","profile_complete":false,"diagnosis_complete":false,"route_defined":false,"cv_ready":false,"followup_pending":false},
+    {"id":"p010","demo_name":"Julia Ejercicio","email":"julia@example.com","municipality":"Villa Nueva","program_id":"prog-emp","status":"interesada","training_type":"otra","profile_complete":false,"diagnosis_complete":false,"route_defined":false,"cv_ready":false,"followup_pending":false},
+    {"id":"p011","demo_name":"Karla Práctica","email":"karla@example.com","municipality":"Mixco","program_id":"prog-dig","status":"interesada","training_type":"curso","profile_complete":false,"diagnosis_complete":false,"route_defined":false,"cv_ready":false,"followup_pending":false},
+    {"id":"p012","demo_name":"Laura Ejemplo","email":"laura@example.com","municipality":"Guatemala","program_id":"prog-tec","status":"interesada","training_type":"tecnica","profile_complete":false,"diagnosis_complete":false,"route_defined":false,"cv_ready":false,"followup_pending":false,"digital_barrier":true}
+  ],
+  "expected_checks": {
+    "total_participants": 12,
+    "graduated_total": 3,
+    "graduated_technical": 2,
+    "cv_ready_total": 5,
+    "followup_pending_total": 2,
+    "interested_total": 3
+  }
+}
+
