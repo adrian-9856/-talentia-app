@@ -9,6 +9,8 @@
 - Validación del contenido en el servidor, límite de tamaño y actualización por correo ficticio para evitar duplicados.
 - Página inicial orientada al recorrido participativo y al panel común.
 - Guion operativo, alcance y límites documentados en `PILOTO_LUNES.md`.
+- Modo de presentación con siete casos ficticios, separado de los registros recibidos en vivo.
+- Nueva narrativa visual que muestra la transformación formulario → señales → ruta → próxima acción.
 
 Esta versión utiliza exclusivamente información ficticia. El panel del piloto todavía no incluye cuentas ni control de acceso institucional.
 
