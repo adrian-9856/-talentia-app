@@ -203,7 +203,7 @@ test("editar un perfil materializa su ruta de demostración y conserva respuesta
 
 test("registro nuevo guarda borradores inválidos recuperables y crea su ruta solo con respuestas válidas", () => {
   const { storage, repo } = fixture();
-  const registered = repo.register({ name: "Marta Demostración", email: "marta.demo@example.com", phone: "", municipality: "Mixco", programId: "prog-emp", consent: true });
+  const registered = repo.register({ name: "Marta Demostración", email: "marta.demo@example.com", phone: "", municipality: "Mixco", consent: true });
   const id = registered.activeParticipantId!;
   assert.equal(getJourney(registered, person(registered, id)), null);
   repo.saveQuestionnaireDraft(id, { occupation: "barista", expectedSalary: "4,500" });

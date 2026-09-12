@@ -1,15 +1,45 @@
-﻿import Link from "./safe-link";
-import { ArrowUpRight, ArrowRight, ChartBar, Users, Buildings, Path, CheckCircle } from "@phosphor-icons/react/dist/ssr";
-import { companies, opportunities, occupations, scenarios } from "../data/labor-market.ts";
+import Link from "./safe-link";
+import { ArrowRight, ChartBar, Users } from "@phosphor-icons/react/dist/ssr";
 
-export default function Home(){
-  const openings=opportunities.reduce((count,offer)=>count+offer.openings,0);
-  return <div className="welcome-page"><header className="welcome-header"><Link className="brand" href="/" aria-label="TALENTIA, inicio"><span className="brand-mark">t</span><span>TALENTIA<small>Conectar talento y oportunidades</small></span></Link><nav aria-label="Acceso a la demo"><Link href="/participante">Vista participante</Link><Link className="button secondary" href="/equipo">Abrir panel<ArrowUpRight size={16}/></Link></nav></header>
-    <main id="main"><section className="welcome-hero"><div className="hero-copy"><span className="eyebrow"><span className="status-dot"/>UNIDAD DE INSERCIÓN LABORAL</span><h1>El talento existe.<br/><span>Conectemos su<br/>próximo paso.</span></h1><p>Un lugar para conocer a las personas, automatizar el trabajo repetitivo y convertir la orientación laboral en acciones concretas.</p><div className="hero-actions"><Link className="button primary hero-cta" href="/participante">Iniciar recorrido piloto<ArrowRight size={18}/></Link><Link className="hero-admin-link" href="/equipo/piloto">Ver panel compartido<ArrowUpRight size={15}/></Link></div><div className="hero-proof"><span className="proof-avatars"><i>J</i><i>H</i><i>L</i></span><span>Siete recorridos individuales.<br/><strong>Una sola bandeja para el equipo.</strong></span></div></div>
-      <div className="product-preview" aria-label="Vista previa del escenario inicial ficticio"><div className="preview-title"><span><ChartBar size={16}/>Vista general</span><span className="demo-label">Datos ficticios</span></div><div className="preview-stats"><div><span>Participantes</span><strong>{Object.keys(scenarios).length}</strong></div><div><span>Empresas</span><strong>{companies.length}</strong></div><div><span>Plazas simuladas</span><strong>{openings}</strong></div></div><div className="preview-chart"><div className="preview-chart-heading"><strong>Talento y oportunidades</strong><small>Intereses y plazas</small></div>{occupations.slice(0,4).map(occupation=>{const count=Object.values(scenarios).filter(scenario=>scenario.answers.occupation===occupation.id).length;const places=opportunities.filter(offer=>offer.occupation===occupation.id).reduce((n,offer)=>n+offer.openings,0);return <div className="preview-bar-row" key={occupation.id}><span>{occupation.label}</span><div><i style={{width:`${count/4*100}%`}}/><b style={{width:`${places/4*100}%`}}/></div><strong>{count}<small> / {places}</small></strong></div>;})}<div className="chart-legend"><span><i style={{background:"#4665e7"}}/>Participantes</span><span><i style={{background:"#b9c8f7"}}/>Plazas</span></div></div><div className="preview-person"><span className="avatar">JE</span><div><strong>Julia Ejercicio</strong><small>Su primer paso hacia el servicio de café</small></div><span className="badge blue">Ruta propuesta</span></div><div className="preview-route"><span><CheckCircle size={15}/>Interés en barista</span><i/><span>Preparar su CV</span><i/><span>Conversar oferta<ArrowUpRight size={13}/></span></div><Link className="preview-link" href="/equipo/rutas?persona=p010">Conocer su historia completa<ArrowUpRight size={15}/></Link></div>
-    </section><section className="value-strip"><div><Users size={22}/><span><strong>Conocer a cada persona</strong><small>Experiencia, intereses y necesidades.</small></span></div><div><Buildings size={22}/><span><strong>Entender las oportunidades</strong><small>Empresas, salarios y condiciones.</small></span></div><div><Path size={22}/><span><strong>Acompañar el siguiente paso</strong><small>Una ruta que el equipo puede seguir.</small></span></div></section>
-    <section className="entry-section"><div><span className="eyebrow">DOS PERSPECTIVAS, UN MISMO CAMINO</span><h2>Entra desde tu lugar.</h2><p>Cada persona completa su recorrido y el equipo recibe la información ya organizada.</p></div><div className="entry-grid"><Link className="entry-card participant-entry" href="/participante"><span className="card-symbol"><Users size={24}/></span><span className="eyebrow">MI CAMINO</span><h3>Soy participante</h3><p>Reconoce tu experiencia, responde el cuestionario, descubre tu ruta y envíala al panel común.</p><span className="entry-action">Comenzar mi recorrido<ArrowUpRight size={18}/></span></Link><Link className="entry-card team-entry" href="/equipo/piloto"><span className="card-symbol"><ChartBar size={24}/></span><span className="eyebrow">CONTROL OPERATIVO</span><h3>Administro el piloto</h3><p>Recibe los siete recorridos, revisa señales y encuentra la próxima acción de cada persona.</p><span className="entry-action">Abrir el panel compartido<ArrowUpRight size={18}/></span></Link></div></section></main>
-    <footer className="welcome-footer"><span>TALENTIA · Demostración funcional</span><span>Personas y empresas ficticias. Prueba local. Las vistas no son un inicio de sesión.</span></footer></div>;
+export default function Home() {
+  return <div className="landing">
+    <header className="landing-brand">
+      <span className="brand-mark">t</span>
+      <div>
+        <strong>TALENTIA</strong>
+        <small>Conectar talento y oportunidades</small>
+      </div>
+    </header>
+
+    <main className="landing-main">
+      <section className="landing-intro">
+        <span className="eyebrow"><span className="status-dot"/>UNIDAD DE INSERCIÓN LABORAL</span>
+        <h1>Entra a TALENTIA</h1>
+        <p>Selecciona tu tipo de acceso para continuar.</p>
+      </section>
+
+      <section className="landing-choices">
+        <Link href="/participante" className="landing-card participant">
+          <div className="landing-card-icon"><Users size={34} weight="duotone"/></div>
+          <h2>Soy participante</h2>
+          <p>Completa tu recorrido: perfil, psicometría, ruta laboral y tu CV listo para enviar.</p>
+          <span className="landing-card-cta">Ingresar<ArrowRight size={16}/></span>
+          <small className="landing-card-note">Próximamente: iniciar sesión con Google</small>
+        </Link>
+
+        <Link href="/equipo" className="landing-card admin">
+          <div className="landing-card-icon"><ChartBar size={34} weight="duotone"/></div>
+          <h2>Soy del equipo</h2>
+          <p>Panel administrativo con dashboard personalizable, buscador y expedientes de cada participante.</p>
+          <span className="landing-card-cta">Ingresar<ArrowRight size={16}/></span>
+          <small className="landing-card-note">Próximamente: iniciar sesión con Google</small>
+        </Link>
+      </section>
+    </main>
+
+    <footer className="landing-footer">
+      <span>TALENTIA · Demostración funcional</span>
+      <span>Personas y empresas ficticias. Prueba local.</span>
+    </footer>
+  </div>;
 }
-
-

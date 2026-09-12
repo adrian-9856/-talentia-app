@@ -7,9 +7,78 @@ import { blankFilters, filterParticipants } from "../domain/repository.ts";
 import type { DemoState, Participant, TeamFilters } from "../domain/types.ts";
 import { ErrorNotice, formatDate, initials, Loading, ProfileDetails, Shell, StatusBadge } from "./shared";
 import { messageFrom, useDemo } from "./use-demo";
-import { getJourney, money, participantProfile } from "../domain/guidance.ts";
+import { getJourney, money, participantProfile, phases, psychometricGroupNames, scorePsychometric } from "../domain/guidance.ts";
 import { occupationLabel } from "../data/labor-market.ts";
 import { JourneyView } from "./journey-components";
+import type { PsychometricAnswers } from "../domain/types.ts";
+import { CheckCircle, Circle, LockSimple } from "@phosphor-icons/react";
+
+function PhaseSummary({ person, state }: { person: Participant; state: DemoState }) {
+  const diag = state.diagnoses?.[person.id];
+  const psych = state.psychometrics?.[person.id];
+  const journey = getJourney(state, person);
+  const cv = state.cvData?.[person.id];
+  const profile = participantProfile(person);
+  const dominant = psych ? scorePsychometric(psych as PsychometricAnswers).dominante : null;
+
+  const phaseData = [
+    {
+      id: phases[0].id, title: phases[0].title, done: !!diag,
+      items: [
+        { label: "Municipio", value: person.municipality },
+        { label: "Urgencia", value: diag?.nivelUrgencia?.split(" –")[0] ?? "Pendiente" },
+        { label: "Motivación", value: diag?.motivacion ?? "Pendiente" },
+      ],
+    },
+    {
+      id: phases[1].id, title: phases[1].title, done: !!psych,
+      items: [
+        { label: "Tipo dominante", value: dominant ? psychometricGroupNames[dominant] : "Test pendiente" },
+        { label: "Estado del test", value: psych ? "Completado (bloqueado)" : "Sin completar" },
+      ],
+    },
+    {
+      id: phases[2].id, title: phases[2].title, done: !!journey,
+      items: [
+        { label: "Ocupación de interés", value: occupationLabel(journey?.answers.occupation ?? "") || "Sin definir" },
+        { label: "Expectativa salarial", value: journey?.answers.expectedSalary ? money(+journey.answers.expectedSalary) : "Sin definir" },
+        { label: "Experiencia declarada", value: journey?.answers.experienceMonths ? `${journey.answers.experienceMonths} meses` : (profile?.experience ? "Con experiencia informal" : "Sin experiencia") },
+      ],
+    },
+    {
+      id: phases[3].id, title: phases[3].title, done: !!cv,
+      items: [
+        { label: "CV", value: cv ? "Listo" : "Pendiente" },
+        { label: "Puestos capturados", value: cv?.experiences?.length ? `${cv.experiences.length}` : "0" },
+        { label: "Estudios capturados", value: cv?.education?.length ? `${cv.education.length}` : "0" },
+      ],
+    },
+  ];
+
+  return <section className="detail-phases">
+    <div className="detail-phases-heading">
+      <span className="eyebrow">RECORRIDO POR FASES</span>
+      <h2>Estado de {person.name.split(" ")[0]} en cada fase</h2>
+    </div>
+    <div className="detail-phases-grid">
+      {phaseData.map((phase, idx) => <article key={phase.id} className={`detail-phase-card ${phase.done ? "done" : "pending"}`}>
+        <header>
+          <span className="detail-phase-num">Fase {idx + 1}</span>
+          <span className="detail-phase-icon">
+            {phase.done ? <CheckCircle size={20} weight="fill"/> : idx === 0 || phaseData[idx-1].done ? <Circle size={20} weight="regular"/> : <LockSimple size={16} weight="fill"/>}
+          </span>
+        </header>
+        <h3>{phase.title}</h3>
+        <dl>
+          {phase.items.map(item => <div key={item.label}>
+            <dt>{item.label}</dt>
+            <dd>{item.value}</dd>
+          </div>)}
+        </dl>
+      </article>)}
+    </div>
+  </section>;
+}
 
 type PendingChange = { from: string; to: string };
 function ConfirmChange({ person, pending, confirm, cancel, error }: { person: Participant; pending: PendingChange; confirm: () => void; cancel: () => void; error: string }) {
@@ -31,14 +100,26 @@ function Detail({ person, saveStatus, back, demo, state }: { person: Participant
   const [tab, setTab] = useState<"profile" | "history" | "route">("route");
   const [notice, setNotice] = useState("");
   const [confirmError, setConfirmError] = useState("");
+  const psychLocked = !!state.psychometrics?.[person.id];
   function confirm() {
     if (pending && saveStatus(pending)) { setPending(null); setConfirmError(""); setNotice("Estado actualizado. El cambio quedó guardado en el historial."); }
     else setConfirmError("No se guardó el cambio. Revisa el aviso del expediente; si el estado cambió en otra vista, cancela y vuelve a seleccionarlo.");
+  }
+  function unlockPsych() {
+    if (!confirm_unlock()) return;
+    try {
+      demo.run(repo => repo.unlockPsychometric(person.id));
+      setNotice(`Test psicométrico desbloqueado. ${person.name.split(" ")[0]} podrá rehacerlo desde su cuenta.`);
+    } catch (cause) { demo.setError(messageFrom(cause)); }
+  }
+  function confirm_unlock(): boolean {
+    return window.confirm(`¿Desbloquear el test psicométrico de ${person.name}? La persona podrá rehacerlo. Sus respuestas actuales se borrarán.`);
   }
   return <>
     <button className="text-button back-button" onClick={back}>← Volver a participantes</button>
     <div className="detail-heading"><div className="person-name"><span className="avatar large">{initials(person.name)}</span><div><span className="eyebrow">EXPEDIENTE DE DEMOSTRACIÓN</span><h1>{person.name}</h1><p>{programLabel(person.enrollment.programId)} · {person.municipality}</p></div></div><StatusBadge status={person.enrollment.status} /></div>
     {notice && <div className="notice success-notice" role="status">{notice}</div>}
+    <PhaseSummary person={person} state={state}/>
     <div className="detail-layout"><section className="panel detail-panel">
       <div className="detail-tabs" aria-label="Secciones del expediente"><button aria-pressed={tab === "route"} className={tab === "route" ? "active" : ""} onClick={() => setTab("route")}>Ruta y oportunidades</button><button aria-pressed={tab === "profile"} className={tab === "profile" ? "active" : ""} onClick={() => setTab("profile")}>Expediente</button><button aria-pressed={tab === "history"} className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Historial <span className="count-tag">{person.history.length}</span></button></div>
       {tab === "route" ? <JourneyView demo={demo} state={state} person={person} team/> : tab === "profile" ? <ProfileDetails person={person} /> : <section className="detail-section"><h3>Historial de cambios</h3><p className="small muted">Cada actualización conserva el estado anterior y quién realizó el cambio en el demo.</p>{person.history.length ? <ol className="history-list">{[...person.history].reverse().map(event => <li key={event.id}><span className="timeline-dot" /><div><strong>{stateLabel(event.from)} <span aria-hidden="true">→</span> {stateLabel(event.to)}</strong><p>{formatDate(event.changedAt)} · {event.changedBy}</p></div></li>)}</ol> : <div className="empty-inline"><strong>Aún no hay cambios de estado.</strong><p>Las actualizaciones confirmadas por el equipo aparecerán aquí.</p></div>}</section>}
@@ -50,6 +131,11 @@ function Detail({ person, saveStatus, back, demo, state }: { person: Participant
       {nextStatus === person.enrollment.status && <p className="small muted">Elige un estado diferente para actualizarlo.</p>}
       <div className="method-note"><strong>Estados de demostración</strong><p>El equipo puede corregirlos manualmente. Los criterios y cambios oficiales están pendientes de validar.</p></div>
       <p className="small muted">Responsable: {config.actor}<br />Último estado: {formatDate(person.enrollment.statusChangedAt)}</p>
+      <div className="admin-actions">
+        <span className="eyebrow">ACCIONES ADMINISTRATIVAS</span>
+        <button className="button secondary full" disabled={!psychLocked} onClick={unlockPsych} title={psychLocked?"Permitir que rehaga el test psicométrico":"El participante todavía no ha completado el test"}>Desbloquear test psicométrico</button>
+        {!psychLocked && <p className="small muted">El test aún no está completado.</p>}
+      </div>
     </aside></div>
     {pending && <ConfirmChange person={person} pending={pending} confirm={confirm} cancel={() => setPending(null)} error={confirmError} />}
   </>;

@@ -10,6 +10,7 @@ export function useDemo() {
   const [state, setState] = useState<DemoState | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [lastSaved, setLastSaved] = useState<number | null>(null);
   const reload = useCallback(() => {
     try {
       repository.current ??= createLocalRepository(window.localStorage);
@@ -40,7 +41,9 @@ export function useDemo() {
     if (!repository.current) throw new Error("Espera a que termine la carga del demo.");
     try {
       const next = action(repository.current);
-      setState(next); setError(""); pendingDraft.current = null; setHasPendingDraft(false); return next;
+      setState(next); setError(""); pendingDraft.current = null; setHasPendingDraft(false);
+      setLastSaved(Date.now());
+      return next;
     } catch (cause) {
       if (keepDraftOnError) { pendingDraft.current = action; setHasPendingDraft(true); }
       throw cause;
@@ -50,7 +53,7 @@ export function useDemo() {
     if (!pendingDraft.current) { reload(); return; }
     try { run(pendingDraft.current, true); } catch (cause) { setError(messageFrom(cause)); }
   }, [reload, run]);
-  return { state, error, setError, loading, reload, retry, run, hasPendingDraft };
+  return { state, error, setError, loading, reload, retry, run, hasPendingDraft, lastSaved };
 }
 
 export function messageFrom(cause: unknown) { return cause instanceof Error ? cause.message : "No se pudo guardar. Inténtalo de nuevo."; }

@@ -1,46 +1,397 @@
-﻿"use client";
+"use client";
 import Link from "./safe-link";
-import { ArrowUpRight, SlidersHorizontal, ArrowRight, Users, Buildings, Briefcase, FileText } from "@phosphor-icons/react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { companies, occupations, opportunities, occupationLabel } from "../data/labor-market.ts";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowUp, ArrowDown, ArrowUpRight, EyeSlash, Plus, DotsThreeVertical, SquaresFour, ArrowsClockwise, MagnifyingGlass, Question } from "@phosphor-icons/react";
+import { Tour, type TourStep } from "./tour";
+
+const ADMIN_TOUR: TourStep[] = [
+  { target: "", title: "Bienvenido al tablero del equipo", body: "Este es tu dashboard personalizable. Aquí ves de un vistazo qué está pasando con todas las personas del programa, y puedes armar tu vista a la medida." },
+  { target: ".admin-toolbar", title: "Vistas rápidas y personalización", body: "Elige una vista predefinida (Ejecutiva, Operativa, Colocación) o añade tus propios widgets con el botón + para armar tu configuración ideal." },
+  { target: ".quick-search", title: "Buscador rápido", body: "Escribe cualquier cosa: ocupación, habilidad, municipio o nombre. El sistema busca en toda la base al instante y te muestra las coincidencias." },
+  { target: ".admin-grid .widget:first-child", title: "Widgets con datos en vivo", body: "Cada widget te muestra información clave del programa. Los datos se actualizan solos según los participantes registrados." },
+  { target: ".widget-actions", title: "Menú de cada widget", body: "En cada widget puedes reorganizarlos: el menú (⋮) te deja subirlo, bajarlo u ocultarlo. Tu configuración se guarda automáticamente." },
+  { target: ".sidebar", title: "Navegación entre pantallas", body: "En el sidebar tienes acceso a todas las pantallas del panel: Vista general, Participantes, Empresas, Rutas y más." },
+];
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { occupations, occupationLabel } from "../data/labor-market.ts";
 import { config } from "../domain/config.ts";
-import { average, getJourney, median, money, participantProfile } from "../domain/guidance.ts";
+import { getJourney, participantProfile, phases, scorePsychometric, psychometricGroupNames, psychometricGroupColors } from "../domain/guidance.ts";
 import { messageFrom, useDemo } from "./use-demo";
-import type { DashboardFilters } from "../domain/types.ts";
+import type { DemoState, Participant, PsychometricAnswers } from "../domain/types.ts";
 import { ErrorNotice, initials, Loading, Shell, StatusBadge } from "./shared";
-import { ChartLegend, EmptyChart, ExportButton, Metric, PageHeading, PanelHeading } from "./analytics-shared";
+import { EmptyChart, PageHeading } from "./analytics-shared";
+
+type WidgetId = "totals" | "funnel" | "occupations" | "urgency" | "psychometric" | "municipality" | "attention";
+type Layout = { order: WidgetId[]; hidden: WidgetId[] };
+
+const WIDGET_META: Record<WidgetId, { title: string; subtitle: string; size: "wide" | "narrow" }> = {
+  totals:       { title: "Métricas totales",           subtitle: "Resumen numérico del programa",                 size: "wide" },
+  funnel:       { title: "Embudo de fases",            subtitle: "Cuántas personas están en cada fase de la ruta", size: "wide" },
+  occupations:  { title: "Ocupaciones más buscadas",   subtitle: "Interés declarado por los participantes",       size: "narrow" },
+  urgency:      { title: "Nivel de urgencia",          subtitle: "Distribución del diagnóstico inicial",          size: "narrow" },
+  psychometric: { title: "Perfiles psicométricos",     subtitle: "Tipo dominante por participante",               size: "narrow" },
+  municipality: { title: "Distribución por municipio", subtitle: "De dónde vienen los participantes",             size: "narrow" },
+  attention:    { title: "Requieren atención",         subtitle: "Personas con actividades pendientes",           size: "wide" },
+};
+
+const DEFAULT_LAYOUT: Layout = { order: ["totals","funnel","occupations","urgency","psychometric","municipality","attention"], hidden: [] };
+const PRESETS: Record<string, { label: string; layout: Layout }> = {
+  ejecutiva:  { label: "Ejecutiva",  layout: { order: ["totals","funnel","urgency"],                                    hidden: ["occupations","psychometric","municipality","attention"] } },
+  operativa:  { label: "Operativa",  layout: { order: ["funnel","attention","occupations","municipality"],              hidden: ["totals","urgency","psychometric"] } },
+  colocacion: { label: "Colocación", layout: { order: ["occupations","psychometric","attention","totals"],              hidden: ["funnel","urgency","municipality"] } },
+  completa:   { label: "Completa",   layout: DEFAULT_LAYOUT },
+};
+
+const STORAGE_KEY = "talentia.admin.layout.v1";
+
+function useLayout(): [Layout, (l: Layout) => void] {
+  const [layout, setLayoutState] = useState<Layout>(DEFAULT_LAYOUT);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Layout;
+        if (Array.isArray(parsed.order) && Array.isArray(parsed.hidden)) setLayoutState(parsed);
+      }
+    } catch { /* ignore */ }
+  }, []);
+  const setLayout = (l: Layout) => {
+    setLayoutState(l);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(l)); } catch { /* ignore */ }
+  };
+  return [layout, setLayout];
+}
+
+function WidgetShell({ id, title, subtitle, size, canMoveUp, canMoveDown, onMoveUp, onMoveDown, onHide, children }: {
+  id: WidgetId; title: string; subtitle: string; size: "wide"|"narrow";
+  canMoveUp: boolean; canMoveDown: boolean;
+  onMoveUp: () => void; onMoveDown: () => void; onHide: () => void;
+  children: ReactNode;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menuOpen]);
+  return <section className={`widget widget-${size}`} data-widget={id}>
+    <header className="widget-head">
+      <div>
+        <h2>{title}</h2>
+        <p>{subtitle}</p>
+      </div>
+      <div className="widget-actions">
+        <button type="button" className="widget-menu-btn" onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }} aria-label="Acciones del widget"><DotsThreeVertical size={18} weight="bold"/></button>
+        {menuOpen && <div className="widget-menu" onClick={(e) => e.stopPropagation()}>
+          <button type="button" disabled={!canMoveUp} onClick={() => { onMoveUp(); setMenuOpen(false); }}><ArrowUp size={14}/>Subir</button>
+          <button type="button" disabled={!canMoveDown} onClick={() => { onMoveDown(); setMenuOpen(false); }}><ArrowDown size={14}/>Bajar</button>
+          <button type="button" onClick={() => { onHide(); setMenuOpen(false); }}><EyeSlash size={14}/>Ocultar</button>
+        </div>}
+      </div>
+    </header>
+    <div className="widget-body">{children}</div>
+  </section>;
+}
+
+function completedStepsCount(state: DemoState, person: Participant): number {
+  let count = 1;
+  if (state.diagnoses?.[person.id]) count++;
+  if (state.psychometrics?.[person.id]) count += 2;
+  if (person.profile) count++;
+  if (getJourney(state, person)) count += 2;
+  if (state.cvData?.[person.id]) count++;
+  return count;
+}
+
+function participantPhaseIdx(state: DemoState, person: Participant): number {
+  const completed = completedStepsCount(state, person);
+  if (completed >= 8) return 3;
+  if (completed >= 5) return 2;
+  if (completed >= 3) return 1;
+  return 0;
+}
+
+function TotalsWidget({ people, state }: { people: Participant[]; state: DemoState }) {
+  const withDiag = people.filter(p => state.diagnoses?.[p.id]).length;
+  const withPsych = people.filter(p => state.psychometrics?.[p.id]).length;
+  const withCv = people.filter(p => state.cvData?.[p.id]).length;
+  const cells = [
+    { label: "Registradas", value: people.length, note: "Expedientes activos" },
+    { label: "Con diagnóstico", value: withDiag, note: `${people.length?Math.round(withDiag/people.length*100):0}% del total` },
+    { label: "Con psicometría", value: withPsych, note: "Test completado" },
+    { label: "Con CV listo", value: withCv, note: "Listo para enviar" },
+  ];
+  return <div className="totals-grid">
+    {cells.map(c => <div className="totals-cell" key={c.label}>
+      <span>{c.label}</span>
+      <strong>{c.value}</strong>
+      <small>{c.note}</small>
+    </div>)}
+  </div>;
+}
+
+function FunnelWidget({ people, state }: { people: Participant[]; state: DemoState }) {
+  const counts = phases.map((_, idx) => people.filter(p => participantPhaseIdx(state, p) >= idx).length);
+  const max = Math.max(...counts, 1);
+  return <div className="funnel-list">
+    {phases.map((p, idx) => {
+      const count = counts[idx];
+      const pct = Math.round((count / max) * 100);
+      return <div className="funnel-row" key={p.id}>
+        <div className="funnel-label"><span className="funnel-num">Fase {p.number}</span><strong>{p.title}</strong></div>
+        <div className="funnel-track"><div className="funnel-fill" style={{width:`${pct}%`}}/></div>
+        <div className="funnel-count">{count}</div>
+      </div>;
+    })}
+  </div>;
+}
+
+function OccupationsWidget({ people, state }: { people: Participant[]; state: DemoState }) {
+  const rows = occupations.map(o => ({
+    name: o.label,
+    count: people.filter(p => getJourney(state, p)?.answers.occupation === o.id).length,
+  })).filter(r => r.count > 0).sort((a,b) => b.count - a.count);
+  if (!rows.length) return <EmptyChart/>;
+  return <ResponsiveContainer width="100%" height={220}>
+    <BarChart data={rows} layout="vertical" margin={{top:6,right:20,bottom:0,left:0}}>
+      <CartesianGrid horizontal={false} stroke="#edf0f5"/>
+      <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{fontSize:11,fill:"#7b8190"}}/>
+      <YAxis dataKey="name" type="category" width={110} tickLine={false} axisLine={false} tick={{fontSize:11,fill:"#515a70"}}/>
+      <Tooltip cursor={{fill:"#f5f7fc"}} contentStyle={{borderRadius:8,border:"1px solid #e6e9ef",fontSize:12}}/>
+      <Bar dataKey="count" fill="#4665e7" radius={[0,4,4,0]} maxBarSize={14} isAnimationActive={false}/>
+    </BarChart>
+  </ResponsiveContainer>;
+}
+
+function UrgencyWidget({ people, state }: { people: Participant[]; state: DemoState }) {
+  const groups = [
+    { label: "Alta", key: "Alta – lo necesito pronto", color: "#d94141" },
+    { label: "Media", key: "Media – en los próximos meses", color: "#e08a3a" },
+    { label: "Baja", key: "Baja – estoy explorando opciones", color: "#33c377" },
+    { label: "Sin diagnóstico", key: "__none__", color: "#c5cde0" },
+  ];
+  const counts = groups.map(g => g.key === "__none__"
+    ? people.filter(p => !state.diagnoses?.[p.id]).length
+    : people.filter(p => state.diagnoses?.[p.id]?.nivelUrgencia === g.key).length);
+  const total = counts.reduce((s,n) => s+n, 0) || 1;
+  return <div className="urgency-list">
+    {groups.map((g,i) => {
+      const c = counts[i];
+      const pct = Math.round(c/total*100);
+      return <div className="urgency-row" key={g.label}>
+        <span className="urgency-dot" style={{background:g.color}}/>
+        <span className="urgency-label">{g.label}</span>
+        <div className="urgency-track"><div style={{width:`${pct}%`,background:g.color}}/></div>
+        <span className="urgency-count">{c} <small>({pct}%)</small></span>
+      </div>;
+    })}
+  </div>;
+}
+
+function PsychometricWidget({ people, state }: { people: Participant[]; state: DemoState }) {
+  const rows = (["R","I","A","S","E","C"] as const).map(g => ({
+    key: g,
+    name: psychometricGroupNames[g],
+    color: psychometricGroupColors[g],
+    count: people.filter(p => {
+      const ans = state.psychometrics?.[p.id];
+      if (!ans) return false;
+      return scorePsychometric(ans as PsychometricAnswers).dominante === g;
+    }).length,
+  }));
+  const hasData = rows.some(r => r.count > 0);
+  if (!hasData) return <EmptyChart/>;
+  return <ResponsiveContainer width="100%" height={220}>
+    <BarChart data={rows} margin={{top:6,right:14,bottom:6,left:0}}>
+      <CartesianGrid vertical={false} stroke="#edf0f5"/>
+      <XAxis dataKey="key" tickLine={false} axisLine={false} tick={{fontSize:11,fill:"#7b8190"}}/>
+      <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{fontSize:11,fill:"#7b8190"}} width={30}/>
+      <Tooltip cursor={{fill:"#f5f7fc"}} contentStyle={{borderRadius:8,border:"1px solid #e6e9ef",fontSize:12}} labelFormatter={(label) => psychometricGroupNames[String(label)] ?? String(label)}/>
+      <Bar dataKey="count" radius={[4,4,0,0]} maxBarSize={38} isAnimationActive={false}>
+        {rows.map(r => <Cell key={r.key} fill={r.color}/>)}
+      </Bar>
+    </BarChart>
+  </ResponsiveContainer>;
+}
+
+function MunicipalityWidget({ people }: { people: Participant[] }) {
+  const map = new Map<string, number>();
+  people.forEach(p => map.set(p.municipality, (map.get(p.municipality) ?? 0) + 1));
+  const rows = Array.from(map.entries()).sort((a,b) => b[1] - a[1]).slice(0, 8);
+  if (!rows.length) return <EmptyChart/>;
+  const max = rows[0][1];
+  return <ul className="municipality-list">
+    {rows.map(([name, count]) => <li key={name}>
+      <span className="municipality-name">{name}</span>
+      <div className="municipality-track"><div style={{width:`${count/max*100}%`}}/></div>
+      <span className="municipality-count">{count}</span>
+    </li>)}
+  </ul>;
+}
+
+function AttentionWidget({ people, state }: { people: Participant[]; state: DemoState }) {
+  const rows = people.map(p => {
+    const journey = getJourney(state, p);
+    const next = journey?.steps.find(s => s.status !== "completado");
+    return { p, journey, next };
+  }).filter(r => r.next).slice(0, 5);
+  if (!rows.length) return <div className="empty-inline">No hay actividades pendientes.</div>;
+  return <ul className="attention-widget-list">
+    {rows.map(({ p, next }) => <li key={p.id}>
+      <Link className="attention-row" href={`/equipo/rutas?persona=${p.id}`}>
+        <span className="avatar">{initials(p.name)}</span>
+        <div><strong>{p.name}</strong><small>{next!.title}</small></div>
+        <StatusBadge status={p.enrollment.status}/>
+        <ArrowUpRight size={16}/>
+      </Link>
+    </li>)}
+  </ul>;
+}
+
+function normalize(text: string) { return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
+
+function QuickSearch({ people, state }: { people: Participant[]; state: DemoState }) {
+  const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const q = normalize(query.trim());
+  const terms = q.split(/\s+/).filter(t => t.length > 1);
+  const matches = terms.length === 0 ? [] : people.filter(p => {
+    const profile = participantProfile(p);
+    const occ = getJourney(state, p)?.answers.occupation ?? "";
+    const occLabel = occupationLabel(occ);
+    const haystack = normalize([
+      p.name, p.email, p.municipality, occLabel,
+      profile?.skills ?? "", profile?.education ?? "", profile?.interest ?? "", profile?.experience ?? "",
+    ].join(" "));
+    return terms.every(t => haystack.includes(t));
+  });
+  return <div className="quick-search">
+    <div className="quick-search-input">
+      <MagnifyingGlass size={18} weight="regular"/>
+      <input type="search" placeholder="Ejemplo: baristas en zona 1 con Excel — busca por ocupación, habilidad, municipio o nombre" value={query} onChange={e => { setQuery(e.target.value); setShowAll(false); }}/>
+      {query && <button type="button" className="text-button" onClick={() => setQuery("")}>Limpiar</button>}
+    </div>
+    {terms.length > 0 && <div className="quick-search-result">
+      <div className="quick-search-count"><strong>{matches.length}</strong> {matches.length === 1 ? "persona coincide" : "personas coinciden"} con «{query}»</div>
+      {matches.length > 0 && <ul className="quick-search-list">
+        {(showAll ? matches : matches.slice(0, 5)).map(p => {
+          const journey = getJourney(state, p);
+          return <li key={p.id}>
+            <Link href={`/equipo/participantes?persona=${p.id}`} className="quick-search-row">
+              <span className="avatar">{initials(p.name)}</span>
+              <div><strong>{p.name}</strong><small>{occupationLabel(journey?.answers.occupation ?? "") || "Sin ocupación"} · {p.municipality}</small></div>
+              <StatusBadge status={p.enrollment.status}/>
+              <ArrowUpRight size={14}/>
+            </Link>
+          </li>;
+        })}
+      </ul>}
+      {matches.length > 5 && !showAll && <button type="button" className="text-button" onClick={() => setShowAll(true)}>Ver los {matches.length - 5} restantes</button>}
+      {matches.length === 0 && <p className="quick-search-empty">Ninguna coincidencia. Prueba con menos palabras o revisa la ortografía.</p>}
+    </div>}
+  </div>;
+}
 
 export default function DashboardScreen(){
-  const demo=useDemo();const {state,loading,error}=demo;
-  const {program="",city="",occupation="",status=""}=state?.dashboardFilters??{};
-  function saveFilters(filters:Partial<DashboardFilters>){try{demo.run(repo=>repo.saveDashboardFilters(filters));}catch(cause){demo.setError(messageFrom(cause));}}
-  const setProgram=(program:string)=>saveFilters({program});const setCity=(city:string)=>saveFilters({city});const setOccupation=(occupation:string)=>saveFilters({occupation});const setStatus=(status:string)=>saveFilters({status});
-  const people=(state?.participants??[]).filter(person=>(!program||person.enrollment.programId===program)&&(!city||person.municipality===city)&&(!occupation||getJourney(state!,person)?.answers.occupation===occupation)&&(!status||person.enrollment.status===status));
-  const offers=opportunities.filter(offer=>(!occupation||offer.occupation===occupation)&&(!city||companies.find(company=>company.id===offer.companyId)?.municipality===city));
-  const sharedOffers=offers.filter(offer=>people.some(person=>getJourney(state!,person)?.answers.occupation===offer.occupation));
-  const demand=occupations.filter(item=>!occupation||item.id===occupation).map(item=>({id:item.id,name:item.label,participants:people.filter(person=>getJourney(state!,person)?.answers.occupation===item.id).length,openings:offers.filter(offer=>offer.occupation===item.id).reduce((n,offer)=>n+offer.openings,0)}));
-  const salaries=occupations.filter(item=>!occupation||item.id===occupation).map(item=>({name:item.label,expectation:median(people.filter(person=>getJourney(state!,person)?.answers.occupation===item.id&&participantProfile(person)?.availability==="Tiempo completo").map(person=>getJourney(state!,person)!.answers.expectedSalary).filter(Boolean).map(Number)),offer:average(offers.filter(offer=>offer.occupation===item.id).map(offer=>offer.baseMin))}));
-  const missingCV=people.filter(person=>getJourney(state!,person)?.answers.cvUpdated==="No").length;
-  const attention=people.filter(person=>getJourney(state!,person)?.steps.some(step=>step.status!=="completado"));
-  const filtered=!!(program||city||occupation||status);
-  const rows=[['Participante ficticia','Municipio','Ocupación','Estado','Expectativa base GTQ','Disponibilidad'],...people.map(person=>[person.name,person.municipality,occupationLabel(getJourney(state!,person)?.answers.occupation??""),config.states.find(item=>item.id===person.enrollment.status)!.label,getJourney(state!,person)?.answers.expectedSalary??"",participantProfile(person)?.availability??""])];
-  return <Shell viewRole="team"><PageHeading eyebrow="INTELIGENCIA PARA EL ACOMPAÑAMIENTO" title="El talento, en perspectiva." description="Personas, oportunidades y próximos pasos en un mismo lugar."><ExportButton rows={rows} filename="talentia-participantes-demo.csv"/></PageHeading>
-    {error&&<ErrorNotice message={error} retry={demo.retry}/>}{loading?<Loading/>:state&&<>
-      <div className="dashboard-filters"><span className="filter-caption"><SlidersHorizontal size={17}/>Explorar</span><label><span className="sr-only">Programa del panel</span><select value={program} onChange={event=>setProgram(event.target.value)}><option value="">Todos los programas</option>{config.programs.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="sr-only">Municipio del panel</span><select value={city} onChange={event=>setCity(event.target.value)}><option value="">Todos los municipios</option>{config.municipalities.map(item=><option key={item}>{item}</option>)}</select></label><label><span className="sr-only">Ocupación del panel</span><select value={occupation} onChange={event=>setOccupation(event.target.value)}><option value="">Todas las ocupaciones</option>{occupations.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>{filtered&&<button className="text-button" onClick={()=>{saveFilters({program:"",city:"",occupation:"",status:""});}}>Limpiar filtros</button>}<span className="snapshot-label">Escenario · Septiembre 2026</span></div>
-      <div className="metrics-grid four"><Metric label="Participantes" value={people.length} detail={`${state.participants.length} expedientes en la demo`} accent><Users size={22}/></Metric><Metric label="Empresas con conexiones" value={new Set(sharedOffers.map(offer=>offer.companyId)).size} detail="Por ocupación de interés compartida"><Buildings size={22}/></Metric><Metric label="Plazas para explorar" value={sharedOffers.reduce((n,offer)=>n+offer.openings,0)} detail={`${sharedOffers.length} oportunidades ficticias relacionadas`}><Briefcase size={22}/></Metric><Metric label="Sin CV actualizado" value={missingCV} detail="Según respuestas del cuestionario"><FileText size={22}/></Metric></div>
-      <div className="dashboard-grid"><section className="panel demand-panel"><PanelHeading title="¿Dónde se encuentran talento y demanda?" description="Participantes por interés y plazas de las empresas del escenario." href="/equipo/empresas"/><ChartLegend items={[{label:"Participantes",color:"#4665e7"},{label:"Plazas ficticias",color:"#b9c8f7"}]}/><div className="chart-container" role="img" aria-label={demand.map(row=>`${row.name}: ${row.participants} participantes, ${row.openings} plazas`).join("; ")}>{demand.length?<ResponsiveContainer width="100%" height={286}><BarChart data={demand} layout="vertical" barGap={3} margin={{top:6,right:24,bottom:0,left:0}}><CartesianGrid horizontal={false} stroke="#edf0f5"/><XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{fontSize:11,fill:"#7b8190"}}/><YAxis dataKey="name" type="category" width={136} tickLine={false} axisLine={false} tick={{fontSize:12,fill:"#515a70"}}/><Tooltip cursor={{fill:"#f5f7fc"}} contentStyle={{borderRadius:8,border:"1px solid #e6e9ef",fontSize:12}}/><Bar name="Participantes" dataKey="participants" fill="#4665e7" radius={[0,3,3,0]} maxBarSize={11} isAnimationActive={false}/><Bar name="Plazas ficticias" dataKey="openings" fill="#b9c8f7" radius={[0,3,3,0]} maxBarSize={11} isAnimationActive={false}/></BarChart></ResponsiveContainer>:<EmptyChart/>}</div><p className="chart-footnote">Una conexión indica interés compartido; quedan experiencia, condiciones y disponibilidad por conversar.</p></section>
-      <section className="panel stage-panel"><PanelHeading title="Momento del acompañamiento" description="Estado registrado por el equipo."/><div className="stage-list">{config.states.map((item,index)=>{
-        const count=people.filter(person=>person.enrollment.status===item.id).length;
-        return <button key={item.id} aria-pressed={status===item.id} className={`stage-row ${status===item.id?"active":""}`} onClick={()=>setStatus(status===item.id?"":item.id)}><span className="stage-index">0{index+1}</span><span className="stage-name">{item.label}<span className="stage-track"><i style={{width:`${people.length?count/people.length*100:0}%`}}/></span></span><strong>{count}</strong></button>;
-      })}</div><p className="chart-footnote">Selecciona un estado para filtrar el panel. Los estados de muestra no acreditan resultados reales.</p></section>
-      <section className="panel"><PanelHeading title="La conversación salarial" description="Expectativa mediana y promedio de las bases iniciales ofrecidas." href="/equipo/salarios" link="Ver observatorio"/><ChartLegend items={[{label:"Expectativa base",color:"#4665e7"},{label:"Oferta base inicial",color:"#28a28a"}]}/><div className="chart-container" role="img" aria-label={salaries.map(row=>`${row.name}: expectativa ${row.expectation===null?"sin datos":money(row.expectation)}, oferta ${row.offer===null?"sin datos":money(row.offer)}`).join("; ")}><ResponsiveContainer width="100%" height={265}><BarChart data={salaries} margin={{top:12,right:16,bottom:10,left:0}}><CartesianGrid vertical={false} stroke="#edf0f5"/><XAxis dataKey="name" tickLine={false} axisLine={false} tick={{fontSize:10,fill:"#6d7688"}} interval={0} angle={-18} textAnchor="end" height={55}/><YAxis tickFormatter={value=>`${value/1000} mil`} tickLine={false} axisLine={false} width={45} tick={{fontSize:11,fill:"#7b8190"}}/><Tooltip formatter={value=>money(Number(value),2)} cursor={{fill:"#f5f7fc"}} contentStyle={{borderRadius:8,border:"1px solid #e6e9ef",fontSize:12}}/><Bar name="Expectativa base" dataKey="expectation" fill="#4665e7" radius={[3,3,0,0]} maxBarSize={17} isAnimationActive={false}/><Bar name="Oferta base inicial" dataKey="offer" fill="#28a28a" radius={[3,3,0,0]} maxBarSize={17} isAnimationActive={false}/></BarChart></ResponsiveContainer></div><p className="chart-footnote">GTQ / mes, sin incentivo. Expectativas con jornada completa; las demás jornadas quedan fuera. Ofertas ficticias, no salarios de mercado.</p></section>
-      <section className="panel"><PanelHeading title="El siguiente paso tiene nombre" description={`${attention.length} personas con actividades pendientes en su ruta.`} href="/equipo/rutas" link="Ver rutas"/><div className="attention-list">{attention.slice(0,4).map(person=>{
-        const journey=getJourney(state,person)!;const next=journey.steps.find(step=>step.status!=="completado")!;
-        return <Link className="attention-row" key={person.id} href={`/equipo/rutas?persona=${person.id}`}><span className="avatar">{initials(person.name)}</span><span><strong>{person.name}</strong><small>{next.title}</small></span><ArrowUpRight size={16}/></Link>;
-      })}{!attention.length&&<div className="empty-inline">No hay actividades pendientes con estos filtros.</div>}</div><div className="case-callout"><span className="case-number">CASO 01</span><div><strong>Julia quiere empezar como barista.</strong><p>Del cuestionario a una ruta concreta y una conversación salarial.</p><Link href="/equipo/rutas?persona=p010">Recorrer su historia<ArrowRight size={15}/></Link></div></div></section></div>
-      <section className="panel overview-table"><PanelHeading title="Personas detrás de los indicadores" description="Abre un expediente para entender su contexto y acompañar su ruta." href="/equipo/participantes" link="Todos los expedientes"/><div className="table-scroll"><table><caption className="sr-only">Participantes de los filtros actuales</caption><thead><tr><th>Participante</th><th>Interés laboral</th><th>Expectativa base / mes</th><th>Estado</th><th>Ruta</th></tr></thead><tbody>{people.map(person=>{const journey=getJourney(state,person);return <tr key={person.id}><td><Link className="person-cell" href={`/equipo/participantes?persona=${person.id}`}><span className="avatar">{initials(person.name)}</span><span><strong>{person.name}</strong><small>{person.municipality}</small></span></Link></td><td>{occupationLabel(journey?.answers.occupation??"")}</td><td className="numeric">{journey?.answers.expectedSalary?money(+journey.answers.expectedSalary):"Por conversar"}<small className="cell-subtext">{participantProfile(person)?.availability||"Jornada por definir"}</small></td><td><StatusBadge status={person.enrollment.status}/></td><td><Link className="inline-link" href={`/equipo/rutas?persona=${person.id}`}>{journey?`${journey.steps.filter(step=>step.status==="completado").length}/${journey.steps.length} pasos`:"Por iniciar"}<ArrowUpRight size={14}/></Link></td></tr>;})}</tbody></table>{!people.length&&<EmptyChart/>}</div></section>
-      <p className="data-caption">Datos ficticios de demostración + cambios guardados en este navegador. Los indicadores se calculan sobre la selección actual.</p>
+  const demo = useDemo();
+  const { state, loading, error } = demo;
+  const [layout, setLayout] = useLayout();
+  const [addOpen, setAddOpen] = useState(false);
+  const people = state?.participants ?? [];
+  const visibleWidgets = useMemo(() => layout.order.filter(id => !layout.hidden.includes(id)), [layout]);
+  const hiddenWidgets = useMemo(() => (Object.keys(WIDGET_META) as WidgetId[]).filter(id => layout.hidden.includes(id) || !layout.order.includes(id)), [layout]);
+
+  function moveUp(id: WidgetId) {
+    const order = layout.order.filter(x => !layout.hidden.includes(x));
+    const idx = order.indexOf(id);
+    if (idx <= 0) return;
+    [order[idx-1], order[idx]] = [order[idx], order[idx-1]];
+    const hiddenPart = layout.order.filter(x => layout.hidden.includes(x));
+    setLayout({ ...layout, order: [...order, ...hiddenPart] });
+  }
+  function moveDown(id: WidgetId) {
+    const order = layout.order.filter(x => !layout.hidden.includes(x));
+    const idx = order.indexOf(id);
+    if (idx < 0 || idx >= order.length - 1) return;
+    [order[idx+1], order[idx]] = [order[idx], order[idx+1]];
+    const hiddenPart = layout.order.filter(x => layout.hidden.includes(x));
+    setLayout({ ...layout, order: [...order, ...hiddenPart] });
+  }
+  function hide(id: WidgetId) { setLayout({ ...layout, hidden: [...layout.hidden.filter(x => x !== id), id] }); }
+  function add(id: WidgetId) {
+    const order = layout.order.includes(id) ? layout.order : [...layout.order, id];
+    setLayout({ order, hidden: layout.hidden.filter(x => x !== id) });
+    setAddOpen(false);
+  }
+  function applyPreset(key: string) { setLayout(PRESETS[key].layout); }
+  function reset() { setLayout(DEFAULT_LAYOUT); }
+
+  function renderWidget(id: WidgetId): ReactNode {
+    if (!state) return null;
+    switch (id) {
+      case "totals":       return <TotalsWidget people={people} state={state}/>;
+      case "funnel":       return <FunnelWidget people={people} state={state}/>;
+      case "occupations":  return <OccupationsWidget people={people} state={state}/>;
+      case "urgency":      return <UrgencyWidget people={people} state={state}/>;
+      case "psychometric": return <PsychometricWidget people={people} state={state}/>;
+      case "municipality": return <MunicipalityWidget people={people}/>;
+      case "attention":    return <AttentionWidget people={people} state={state}/>;
+    }
+  }
+
+  return <Shell viewRole="team">
+    <Tour storageKey="tour.admin.v1" steps={ADMIN_TOUR} startEvent="tour:start:admin"/>
+    <button type="button" className="tour-help-btn" onClick={() => window.dispatchEvent(new Event("tour:start:admin"))} title="Ver ayuda / repetir tour" aria-label="Ver ayuda"><Question size={20} weight="bold"/></button>
+    <PageHeading eyebrow="INICIO DEL EQUIPO" title="Tu tablero, a tu manera." description="Personaliza los widgets. Cámbialos de orden, ocúltalos o cambia de vista con un click."/>
+    {error && <ErrorNotice message={error} retry={demo.retry}/>}
+    {loading ? <Loading/> : state && <>
+      <div className="admin-toolbar">
+        <div className="admin-toolbar-group">
+          <SquaresFour size={16}/>
+          <span className="admin-toolbar-label">Vistas rápidas</span>
+          {Object.entries(PRESETS).map(([key, p]) => <button key={key} type="button" className="preset-chip" onClick={() => applyPreset(key)}>{p.label}</button>)}
+          <button type="button" className="preset-chip subtle" onClick={reset} title="Restablecer al orden inicial"><ArrowsClockwise size={13}/>Reiniciar</button>
+        </div>
+        <div className="admin-toolbar-group">
+          <div className="admin-add-wrap">
+            <button type="button" className="button secondary" onClick={() => setAddOpen(v => !v)} disabled={hiddenWidgets.length === 0}><Plus size={15}/>Añadir widget</button>
+            {addOpen && hiddenWidgets.length > 0 && <div className="admin-add-menu">
+              <div className="admin-add-title">Widgets disponibles</div>
+              {hiddenWidgets.map(id => <button key={id} type="button" onClick={() => add(id)}>
+                <strong>{WIDGET_META[id].title}</strong>
+                <small>{WIDGET_META[id].subtitle}</small>
+              </button>)}
+            </div>}
+          </div>
+        </div>
+      </div>
+
+      <QuickSearch people={people} state={state}/>
+
+      <div className="admin-grid">
+        {visibleWidgets.map((id, idx) => <WidgetShell
+          key={id}
+          id={id}
+          title={WIDGET_META[id].title}
+          subtitle={WIDGET_META[id].subtitle}
+          size={WIDGET_META[id].size}
+          canMoveUp={idx > 0}
+          canMoveDown={idx < visibleWidgets.length - 1}
+          onMoveUp={() => moveUp(id)}
+          onMoveDown={() => moveDown(id)}
+          onHide={() => hide(id)}
+        >
+          {renderWidget(id)}
+        </WidgetShell>)}
+      </div>
+
+      {visibleWidgets.length === 0 && <div className="empty-state admin-empty">
+        <h3>Sin widgets visibles</h3>
+        <p>Añade widgets desde el botón superior o selecciona una vista rápida.</p>
+      </div>}
+
+      <p className="data-caption">Tu configuración se guarda en este navegador. Datos ficticios de demostración.</p>
     </>}
   </Shell>;
 }
-

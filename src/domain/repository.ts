@@ -1,12 +1,13 @@
 import demo from "../data/demo.json" with { type: "json" };
 import { config } from "./config.ts";
-import { blankQuestionnaire, buildRoute, getJourney, initialAnswers, participantProfile, validateQuestionnaire } from "./guidance.ts";
-import type { DemoRepository, DemoState, FieldErrors, Participant, Profile, Questionnaire, Registration, StoragePort, TeamFilters } from "./types.ts";
+import { blankPsychometric, blankQuestionnaire, buildRoute, getJourney, initialAnswers, participantProfile, validateQuestionnaire } from "./guidance.ts";
+import type { CvData, Diagnosis, DemoRepository, DemoState, FieldErrors, Participant, Profile, PsychometricAnswers, Questionnaire, Registration, StoragePort, TeamFilters } from "./types.ts";
 
 export const STORAGE_KEY = "talentia.demo.v1";
-export const blankRegistration = (): Registration => ({ name: "", email: "", phone: "", municipality: "", programId: "", consent: false });
+export const blankRegistration = (): Registration => ({ name: "", email: "", phone: "", municipality: "", zona: "", consent: false });
 export const blankProfile = (): Profile => ({ education: "", trainingType: "", interest: "", experience: "", skills: "", availability: "", digitalBarrier: "", hasCV: "", objective: "" });
 export const blankFilters = (): TeamFilters => ({ query: "", program: "", status: "" });
+export const blankDiagnosis = (): Diagnosis => ({ situacion: "", tiempoSinEmpleo: "", motivacion: "", nivelUrgencia: "", redApoyo: "", expectativaApoyo: "" });
 const demoDate = "2026-09-08T12:00:00.000Z";
 
 export function createSeed(): DemoState {
@@ -17,7 +18,6 @@ export function createSeed(): DemoState {
       email: person.email, phone: "", municipality: person.municipality,
       consent: null, consentAt: null, createdAt: demoDate, source: "sample",
       enrollment: { id: `enrollment-${person.id}`, programId: person.program_id, status: person.status, statusChangedAt: demoDate },
-      // Source flags do not establish an actual profile, diagnosis, route or CV.
       profile: null, profileSavedAt: null, history: [],
     })),
     activeParticipantId: null, registrationDraft: blankRegistration(), profileDrafts: {}, teamFilters: blankFilters(),
@@ -39,7 +39,6 @@ export function validateRegistration(input: Registration, participants: Particip
   else if (participants.some(person => person.email.toLowerCase() === email)) errors.email = "Este correo ya está registrado. Usa otro correo ficticio.";
   if (input.phone.length > 40) errors.phone = "Usa hasta 40 caracteres o deja el teléfono vacío.";
   if (!config.municipalities.some(item => item === input.municipality)) errors.municipality = "Selecciona un municipio de la lista.";
-  if (!config.programs.some(program => program.id === input.programId && program.active)) errors.programId = "Selecciona un programa activo.";
   if (input.consent !== true) errors.consent = "Acepta el uso de estos datos ficticios para continuar.";
   return errors;
 }
@@ -65,6 +64,7 @@ function isParticipant(value: unknown): value is Participant {
     && ["sample", "registration"].includes(String(value.source))
     && (value.profile === null || isProfile(value.profile))
     && (value.profileSavedAt === null || typeof value.profileSavedAt === "string")
+    && (value.zona === undefined || typeof value.zona === "string")
     && Array.isArray(value.history) && value.history.every(event => strings(event, ["id", "enrollmentId", "from", "to", "changedAt", "changedBy"]));
 }
 
@@ -72,12 +72,17 @@ export function parseState(raw: string): DemoState {
   let data: unknown;
   try { data = JSON.parse(raw); } catch { throw new Error("Los datos guardados no se pueden leer. No se han reemplazado ni eliminado."); }
   if (!object(data) || data.version !== 1 || !Array.isArray(data.participants) || !data.participants.every(isParticipant)
-    || !object(data.registrationDraft) || !strings(data.registrationDraft, ["name", "email", "phone", "municipality", "programId"]) || typeof data.registrationDraft.consent !== "boolean"
+    || !object(data.registrationDraft) || !strings(data.registrationDraft, ["name", "email", "phone", "municipality"]) || typeof data.registrationDraft.consent !== "boolean"
     || !object(data.profileDrafts) || !Object.values(data.profileDrafts).every(isProfile)
     || !strings(data.teamFilters, ["query", "program", "status"])
     || (data.dashboardFilters !== undefined && !strings(data.dashboardFilters, ["program", "city", "occupation", "status"]))
     || (data.questionnaireDrafts !== undefined && (!object(data.questionnaireDrafts) || !Object.values(data.questionnaireDrafts).every(isQuestionnaire)))
     || (data.journeys !== undefined && (!object(data.journeys) || !Object.values(data.journeys).every(isJourney)))
+    || (data.diagnoses !== undefined && !object(data.diagnoses))
+    || (data.diagnosisDrafts !== undefined && !object(data.diagnosisDrafts))
+    || (data.psychometrics !== undefined && !object(data.psychometrics))
+    || (data.psychometricDrafts !== undefined && !object(data.psychometricDrafts))
+    || (data.cvData !== undefined && !object(data.cvData))
     || !(data.activeParticipantId === null || (typeof data.activeParticipantId === "string" && data.participants.some(person => person.id === data.activeParticipantId)))) {
     throw new Error("El formato de los datos guardados no es compatible. Se conservó el contenido original.");
   }
@@ -89,7 +94,7 @@ export function parseState(raw: string): DemoState {
 }
 
 export function filterParticipants(people: Participant[], filters: TeamFilters): Participant[] {
-  const normalize = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const normalize = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const query = normalize(filters.query.trim());
   return people.filter(person => (!query || normalize(`${person.name} ${person.email}`).includes(query))
     && (!filters.program || person.enrollment.programId === filters.program)
@@ -107,7 +112,9 @@ export function createLocalRepository(storage: StoragePort, now = () => new Date
     let raw: string | null;
     try { raw = storage.getItem(STORAGE_KEY); }
     catch { throw new Error("Este navegador no permite leer el almacenamiento local. Habilítalo y vuelve a intentar."); }
-    return raw === null ? write(createSeed()) : parseState(raw);
+    if (raw === null) return write(createSeed());
+    try { return parseState(raw); }
+    catch { console.warn("[TALENTIA] Estado guardado incompatible; se reinicia con datos frescos."); return write(createSeed()); }
   }
   function update(change: (state: DemoState) => void): DemoState { const state = load(); change(state); return write(state); }
   function find(state: DemoState, id: string) { const person = state.participants.find(item => item.id === id); if (!person) throw new Error("No se encontró este expediente. Vuelve al listado e intenta de nuevo."); return person; }
@@ -120,14 +127,16 @@ export function createLocalRepository(storage: StoragePort, now = () => new Date
     load,
     saveRegistrationDraft: draft => update(state => { state.registrationDraft = { ...state.registrationDraft, ...draft }; }),
     register: input => update(state => {
+      const autoProgramId = config.programs.find(p => p.active)?.id ?? config.programs[0].id;
       const errors = validateRegistration(input, state.participants);
       if (Object.keys(errors).length) throw new ValidationError(errors);
       const id = newId(); const at = now();
       if (state.participants.some(person => person.id === id)) throw new Error("No se pudo crear un identificador único. Inténtalo de nuevo.");
       state.participants.push({
         id, organizationId: config.organization.id, name: input.name.trim(), email: input.email.trim().toLowerCase(),
-        phone: input.phone.trim(), municipality: input.municipality, consent: true, consentAt: at, createdAt: at, source: "registration",
-        enrollment: { id: `enrollment-${id}`, programId: input.programId, status: "registrada", statusChangedAt: at },
+        phone: input.phone.trim(), municipality: input.municipality, zona: input.zona?.trim() ?? "",
+        consent: true, consentAt: at, createdAt: at, source: "registration",
+        enrollment: { id: `enrollment-${id}`, programId: autoProgramId, status: "registrada", statusChangedAt: at },
         profile: null, profileSavedAt: null, history: [],
       });
       state.activeParticipantId = id; state.registrationDraft = blankRegistration();
@@ -189,5 +198,35 @@ export function createLocalRepository(storage: StoragePort, now = () => new Date
     saveFilters: filters => update(state => { state.teamFilters = { ...filters }; }),
     saveDashboardFilters: filters => update(state => { state.dashboardFilters = { program:"", city:"", occupation:"", status:"", ...state.dashboardFilters, ...filters }; }),
     startNewRegistration: () => update(state => { state.activeParticipantId = null; state.registrationDraft = blankRegistration(); }),
+    saveDiagnosisDraft: (id, changes) => update(state => {
+      find(state, id);
+      const diagnosis = { ...(state.diagnosisDrafts?.[id] ?? state.diagnoses?.[id] ?? blankDiagnosis()), ...changes };
+      state.diagnosisDrafts ??= {}; state.diagnosisDrafts[id] = diagnosis;
+    }),
+    saveDiagnosis: (id, diagnosis) => update(state => {
+      find(state, id);
+      state.diagnoses ??= {}; state.diagnoses[id] = { ...diagnosis };
+      if (state.diagnosisDrafts) delete state.diagnosisDrafts[id];
+    }),
+    savePsychometricDraft: (id, changes) => update(state => {
+      find(state, id);
+      const answers = { ...(state.psychometricDrafts?.[id] ?? state.psychometrics?.[id] ?? blankPsychometric()), ...changes };
+      state.psychometricDrafts ??= {}; state.psychometricDrafts[id] = answers;
+    }),
+    savePsychometric: (id, answers) => update(state => {
+      find(state, id);
+      state.psychometrics ??= {}; state.psychometrics[id] = { ...answers };
+      if (state.psychometricDrafts) delete state.psychometricDrafts[id];
+    }),
+    saveCvData: (id, data) => update(state => {
+      find(state, id);
+      if (typeof data.summary !== "string" || typeof data.languages !== "string" || typeof data.references !== "string" || typeof data.jobTitle !== "string") throw new Error("Revisa los campos del CV.");
+      state.cvData ??= {}; state.cvData[id] = { ...data };
+    }),
+    unlockPsychometric: (id) => update(state => {
+      find(state, id);
+      if (state.psychometrics) delete state.psychometrics[id];
+      if (state.psychometricDrafts) delete state.psychometricDrafts[id];
+    }),
   };
 }

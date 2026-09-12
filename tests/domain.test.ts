@@ -10,7 +10,7 @@ class MemoryStorage implements StoragePort {
   getItem(key: string) { return this.data.get(key) ?? null; }
   setItem(key: string, value: string) { if (this.blocked) throw new Error("QuotaExceededError"); this.data.set(key, value); }
 }
-const registration = (): Registration => ({ name: "Marina Ensayo", email: "marina.ensayo@example.com", phone: "", municipality: "Mixco", programId: "prog-tec", consent: true });
+const registration = (): Registration => ({ name: "Marina Ensayo", email: "marina.ensayo@example.com", phone: "", municipality: "Mixco", zona: "Zona 4", consent: true });
 const at = "2026-09-08T18:00:00.000Z";
 function fixture() { const storage = new MemoryStorage(); let sequence = 0; return { storage, repo: createLocalRepository(storage, () => at, () => `test-${++sequence}`) }; }
 
@@ -35,7 +35,7 @@ test("flujo completo: registro, perfil parcial, recarga, búsqueda, cambio e his
   assert.deepEqual(createLocalRepository(storage).load().profileDrafts[id], profile);
   repo.saveProfile(id, profile);
   const reopened = createLocalRepository(storage, () => at, () => "event-2");
-  const found = filterParticipants(reopened.load().participants, { ...blankFilters(), query: "MARINA", program: "prog-tec", status: "registrada" });
+  const found = filterParticipants(reopened.load().participants, { ...blankFilters(), query: "MARINA", status: "registrada" });
   assert.equal(found.length, 1); assert.equal(found[0].name, "Marina Ensayo"); assert.equal(found[0].email, "marina.ensayo@example.com");
   assert.equal(found[0].consentAt, at); assert.deepEqual(found[0].profile, profile);
   const updated = reopened.changeStatus(id, "en_acompanamiento", "registrada");
@@ -49,8 +49,8 @@ test("flujo completo: registro, perfil parcial, recarga, búsqueda, cambio e his
 
 test("campos requeridos, correo de demo, consentimiento y catálogos se validan en datos", () => {
   const { repo } = fixture();
-  assert.deepEqual(Object.keys(validateRegistration(blankRegistration(), [])).sort(), ["name", "email", "municipality", "programId", "consent"].sort());
-  for (const input of [{ ...registration(), email: "marina@" }, { ...registration(), email: "marina@real.test" }, { ...registration(), consent: false }, { ...registration(), municipality: "Fuera de catálogo" }, { ...registration(), programId: "inexistente" }, { ...registration(), name: " " }]) {
+  assert.deepEqual(Object.keys(validateRegistration(blankRegistration(), [])).sort(), ["name", "email", "municipality", "consent"].sort());
+  for (const input of [{ ...registration(), email: "marina@" }, { ...registration(), email: "marina@real.test" }, { ...registration(), consent: false }, { ...registration(), municipality: "Fuera de catálogo" }, { ...registration(), name: " " }]) {
     assert.throws(() => repo.register(input), ValidationError);
     assert.equal(repo.load().participants.length, 12);
   }
